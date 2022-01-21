@@ -1,59 +1,58 @@
 import cv2
+import numpy as np
 import mediapipe as mp
+
 mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
-mp_face_mesh = mp.solutions.face_mesh
+mp_hands = mp.solutions.hands
 
 # For static images:
 IMAGE_FILES = []
-drawing_spec = mp_drawing.DrawingSpec(thickness=1, circle_radius=1)
-with mp_face_mesh.FaceMesh(
+with mp_hands.Hands(
     static_image_mode=True,
-    max_num_faces=1,
-    refine_landmarks=True,
-    min_detection_confidence=0.5) as face_mesh:
+    max_num_hands=2,
+    min_detection_confidence=0.5) as hands:
   for idx, file in enumerate(IMAGE_FILES):
-    image = cv2.imread(file)
+    # Read an image, flip it around y-axis for correct handedness output (see
+    # above).
+    image = cv2.flip(cv2.imread(file), 1)
     # Convert the BGR image to RGB before processing.
-    results = face_mesh.process(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+    results = hands.process(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
 
-    # Print and draw face mesh landmarks on the image.
-    if not results.multi_face_landmarks:
+    # Print handedness and draw hand landmarks on the image.
+    print('Handedness:', results.multi_handedness)
+    if not results.multi_hand_landmarks:
       continue
+    image_height, image_width, _ = image.shape
     annotated_image = image.copy()
-    for face_landmarks in results.multi_face_landmarks:
-      print('face_landmarks:', face_landmarks)
+    for hand_landmarks in results.multi_hand_landmarks:
+      print('hand_landmarks:', hand_landmarks)
+      print(
+          f'Index finger tip coordinates: (',
+          f'{hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP].x * image_width}, '
+          f'{hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP].y * image_height})'
+      )
       mp_drawing.draw_landmarks(
-          image=annotated_image,
-          landmark_list=face_landmarks,
-          connections=mp_face_mesh.FACEMESH_TESSELATION,
-          landmark_drawing_spec=None,
-          connection_drawing_spec=mp_drawing_styles
-          .get_default_face_mesh_tesselation_style())
-      mp_drawing.draw_landmarks(
-          image=annotated_image,
-          landmark_list=face_landmarks,
-          connections=mp_face_mesh.FACEMESH_CONTOURS,
-          landmark_drawing_spec=None,
-          connection_drawing_spec=mp_drawing_styles
-          .get_default_face_mesh_contours_style())
-      mp_drawing.draw_landmarks(
-          image=annotated_image,
-          landmark_list=face_landmarks,
-          connections=mp_face_mesh.FACEMESH_IRISES,
-          landmark_drawing_spec=None,
-          connection_drawing_spec=mp_drawing_styles
-          .get_default_face_mesh_iris_connections_style())
-    cv2.imwrite('/tmp/annotated_image' + str(idx) + '.png', annotated_image)
+          annotated_image,
+          hand_landmarks,
+          mp_hands.HAND_CONNECTIONS,
+          mp_drawing_styles.get_default_hand_landmarks_style(),
+          mp_drawing_styles.get_default_hand_connections_style())
+    cv2.imwrite(
+        '/tmp/annotated_image' + str(idx) + '.png', cv2.flip(annotated_image, 1))
+    # Draw hand world landmarks.
+    if not results.multi_hand_world_landmarks:
+      continue
+    for hand_world_landmarks in results.multi_hand_world_landmarks:
+      mp_drawing.plot_landmarks(
+        hand_world_landmarks, mp_hands.HAND_CONNECTIONS, azimuth=5)
 
 # For webcam input:
-drawing_spec = mp_drawing.DrawingSpec(thickness=1, circle_radius=1)
 cap = cv2.VideoCapture(0)
-with mp_face_mesh.FaceMesh(
-    max_num_faces=1,
-    refine_landmarks=True,
+with mp_hands.Hands(
+    model_complexity=0,
     min_detection_confidence=0.5,
-    min_tracking_confidence=0.5) as face_mesh:
+    min_tracking_confidence=0.5) as hands:
   while cap.isOpened():
     success, image = cap.read()
     if not success:
@@ -65,36 +64,21 @@ with mp_face_mesh.FaceMesh(
     # pass by reference.
     image.flags.writeable = False
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    results = face_mesh.process(image)
+    results = hands.process(image)
 
-    # Draw the face mesh annotations on the image.
+    # Draw the hand annotations on the image.
     image.flags.writeable = True
     image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-    if results.multi_face_landmarks:
-      for face_landmarks in results.multi_face_landmarks:
+    if results.multi_hand_landmarks:
+      for hand_landmarks in results.multi_hand_landmarks:
         mp_drawing.draw_landmarks(
-            image=image,
-            landmark_list=face_landmarks,
-            connections=mp_face_mesh.FACEMESH_TESSELATION,
-            landmark_drawing_spec=None,
-            connection_drawing_spec=mp_drawing_styles
-            .get_default_face_mesh_tesselation_style())
-        mp_drawing.draw_landmarks(
-            image=image,
-            landmark_list=face_landmarks,
-            connections=mp_face_mesh.FACEMESH_CONTOURS,
-            landmark_drawing_spec=None,
-            connection_drawing_spec=mp_drawing_styles
-            .get_default_face_mesh_contours_style())
-        mp_drawing.draw_landmarks(
-            image=image,
-            landmark_list=face_landmarks,
-            connections=mp_face_mesh.FACEMESH_IRISES,
-            landmark_drawing_spec=None,
-            connection_drawing_spec=mp_drawing_styles
-            .get_default_face_mesh_iris_connections_style())
+            image,
+            hand_landmarks,
+            mp_hands.HAND_CONNECTIONS,
+            mp_drawing_styles.get_default_hand_landmarks_style(),
+            mp_drawing_styles.get_default_hand_connections_style())
     # Flip the image horizontally for a selfie-view display.
-    cv2.imshow('MediaPipe Face Mesh', cv2.flip(image, 1))
+    cv2.imshow('MediaPipe Hands', cv2.flip(image, 1))
     if cv2.waitKey(5) & 0xFF == 27:
       break
 cap.release()
